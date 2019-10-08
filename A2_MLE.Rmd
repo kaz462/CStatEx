@@ -1,0 +1,268 @@
+---
+title: "STAT 812 - Assignment 2"
+author: "Kangjie Zhang"
+date: "November 7, 2018"
+output:
+  md_document:
+    variant: markdown_github
+    df_print: paged
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Question 1
+### Likelihood function: 
+$$
+L(a,b)=\prod_{i=1}^{m} \frac{\lambda(t_i)^{n_i} \exp(-\lambda(t_i)) }{n_i!}
+$$
+
+###n data points: 
+$$(t_1,n_1), \ (t_2,n_2),...,(t_m,n_m) $$
+
+###Negative log-likelihood function of $a$ and $b$:
+$$-l(a,b)=-\log(L(a,b))=-\sum_{i=1}^{m} [ n_i(a+bt_i)-e^{a+bt_i} -\log n_i!]$$
+
+###Negative score function:
+$$-\frac{\partial l(a,b)}{\partial a}=-\sum_{i=1}^{m}[n_i-e^{a+bt_i}] $$
+$$-\frac{\partial l(a,b)}{\partial b}=-\sum_{i=1}^{m}[(n_i-e^{a+bt_i})t_i]$$
+
+###Information function:
+$$-\frac{\partial^2 l(a,b)}{\partial a^2}=\sum_{i=1}^{m} [e^{a+bt_i}] $$
+$$-\frac{\partial^2 l(a,b)}{\partial a\partial b}=\sum_{i=1}^{m} [e^{a+bt_i}t_i] $$
+
+$$-\frac{\partial^2 l(a,b)}{\partial b^2}=\sum_{i=1}^{m} [e^{a+bt_i} t_i^2] $$
+
+###Hessian matrix:
+$$\triangledown^2-l(a,b)=\sum_{i=1}^{m}  
+\begin{pmatrix} 
+1 & t_i \\
+t_i & t_i^2 
+\end{pmatrix}
+e^{a+bt_i}$$
+
+From the above expression, we see $\triangledown^2-l(a,b)$ is positive definite unless $t_1=...=t_m$. Thus, this is a well-behaved problem.
+
+## Program - R
+### Function lik_score_info,  mle_nr 
+```{r}
+# function to compute -log likelihood, -score and information.
+# b=parameters, t=times, n=the number of decays
+lik_score_info <- function(b,t,n) {
+  lambda <- exp(b[1]+b[2]*t)
+  l <- -sum((b[1]+b[2]*t)*n-lambda) #-log(factorial(n))
+  s <- -c(sum(n-lambda),sum(t*(n-lambda)))
+  v <- matrix(c(sum(lambda),sum(lambda*t),0,sum(lambda*t*t)),2,2)
+  v[1,2] <- v[2,1]
+  list(neg.loglik=l,neg.score=s,inf=v)
+}
+
+# finding MLE with newton-raphson method
+mle_nr <- function(b0, no_iter, t, n, debug=FALSE)
+{
+  result_nr <- matrix(0,no_iter+1, 3)
+  colnames(result_nr) <- c('a','b','neg_loglike')
+  result_nr[1,] <- c(b0, 0)
+  for( i in 1:no_iter + 1)
+  {
+    q <- lik_score_info(result_nr[i-1,1:2],t,n)
+    result_nr[i,1:2] <- result_nr[i-1,1:2] - solve(q$inf,q$neg.score)
+    result_nr[i-1,3] <- q$neg.loglik
+    if(debug) print(result_nr[i-1,])
+  }
+  result_nr[-(no_iter+1),]
+}
+```
+
+### Generate data and test function mle_nr 
+```{r}
+# generate a data set
+# b=parameters; m=the number of data points
+# gen_data1 generating data with very big values for n
+# converge to something other than global maximum
+gen_data1 <- function(b,m)
+{
+  t <- sort(runif(m,0,40))  
+  lambda <- exp(b[1]+b[2]*t)
+  n <- rpois(m,lambda)
+  plot (t, n, type = "l", main = "data 1(with extreme values)")
+  list(t=t,n=n)
+}
+
+# take a=0.5, b=0.5 for example
+data1 <- gen_data1(c(0.5,0.5),10000)
+# using self-programmed newton method using data1
+# converge to something other than global maximum
+mle1 <- mle_nr( c(1,1), 15, data1$t, data1$n)
+mle1 
+
+# gen_data2 generating data with reasonable values for n
+# converge to global maximum
+gen_data2 <- function(b,m)
+{
+  t <- sort(runif(m,0,10))  
+  lambda <- exp(b[1]+b[2]*t)
+  n <- rpois(m,lambda)
+  plot (t, n, type = "l", main = "data 2(good data set)")
+  list(t=t,n=n)
+}
+
+data2 <- gen_data2(c(0.5,0.5),10000)
+# using self-programmed newton method using data2
+# converge to global maximum
+mle2 <- mle_nr( c(1,1), 15, data2$t, data2$n)
+mle2 
+```
+
+### Estimated covariance matrix
+```{r}
+obs.inf <- lik_score_info(mle2[15,1:2], data2$t, data2$n)$inf
+cov.matrix <- solve(obs.inf); cov.matrix
+## standard errors for a and b
+se <- sqrt(diag(cov.matrix)); se
+```
+
+### R built-in function nlm to find MLE
+```{r}
+# use R built-in function nlm to find MLE
+# drop constant 
+neg_loglike <- function(b,t,n)
+{
+  lambda <- exp(b[1]+b[2]*t)
+  -sum((b[1]+b[2]*t)*n-lambda)
+}
+
+# using data1, good initial values converges to global maximum 
+nlm (neg_loglike, c(0.45, 0.55) , t = data1$t, n = data1$n, hessian = T)
+# using data1, bad initial values causing problem
+nlm (neg_loglike, c(1, 1) , t = data1$t, n = data1$n, hessian = T)
+
+# using data2, good initial values converges to global maximum
+nlm (neg_loglike, c(0.2, 0.8) , t = data2$t, n = data2$n, hessian = T) -> mle_nlm; mle_nlm
+# using data2, bad initial values causing problem
+nlm (neg_loglike, c(1, 2) , t = data2$t, n = data2$n, hessian = T)
+
+# find MLE standard errors using hessian of negative log likelihood from nlm
+se.nlm <- sqrt (diag (solve(mle_nlm$hessian)))
+# compare MLE and standard errors based on N-R function and built in function nlm
+# se.nlm and se(based on observed information)
+compare1 <- data.frame(rbind(mle2[15,1:2],mle_nlm$estimate,se,se.nlm),
+                row.names = c("mle_nr","mle_nlm","se_nr","se_nlm"))
+colnames(compare1) <- c("a","b")
+compare1
+```
+
+### Comments
+For question 1, there are problems with Newton-Raphson iterations failing to converge or converging to something other than the global maximum. From the above examples, different data sets lead to different results. It might be worth trying set boundaries when generating the data, to avoid extreme values for lambda. So Newton-Raphson method has problems and limitations for this question. For R built-in function nlm, it works better if we are able to find the good initial values; but it also has convergence problem if we do not have good initial values. 
+
+
+# Question 2
+### Function EM.truncnorm
+```{r}
+library(truncnorm)
+loglike <- function(mu,sigma,y)
+{
+  sum(log(pnorm((y+1-mu)/sigma) - pnorm((y-mu)/sigma)))
+}
+# The function below finds the maximum likelihood estimate for mu, sigma given
+# the data, using the EM algorithm started from the specified guess at mu0 and 
+# sigma (default being the mean and standard deviation of y), run for the
+# specified number of iterations (default 15).  The log likelihood is printed 
+# at each iteration.  It should never decrease.
+# Z is missed data
+# y is observed integer part of Z
+# m is the number of sample size from truncnorm
+EM.truncnorm <- function (m, y, mu0=mean(y), sigma0=sqrt(var(y)), iterations=15)
+{
+  # Set initial guess, and print it and its log likelihood.
+  n <- length(y)
+  mu <- mu0
+  sigma <- sigma0
+  cat (0, mu, sigma, loglike(mu,sigma,y), "\n")
+  
+  # Do EM iterations.
+  for (i in 1:iterations)
+  {
+    # The E step: For this model, draw samples from a truncated normal distribution 
+    # to approximate the expectation of Z and Z^2, denoted by EZ and EZ2 respectively
+    EZ <- rep(0,n) 
+    for (j in 1:n) {
+      EZ[j] <- mean(rtruncnorm(m, a=y[j], b=y[j]+1, mean = mu, sd = sigma))
+      sum.EZ <- sum(EZ)
+    }
+    
+    EZ2 <- rep(0,n) 
+    for (j in 1:n) {
+      EZ2[j] <- mean(rtruncnorm(m, a=y[j], b=y[j]+1, mean = mu, sd = sigma)^2)
+      sum.EZ2 <- sum(EZ2)
+    }
+    
+    # The M step: Find the mu and sigma that maximizes the log likelihood
+    # with unobserved data filled in according to the distribution found in
+    # the E step.
+    mu <- sum.EZ/n
+    sigma <- sqrt((sum.EZ2 - 2*mu*sum.EZ + n*mu^2)/(n)) 
+    
+    # Print the new guess and its log likelihood.
+    cat (i, mu, sigma, loglike(mu,sigma,y), "\n")
+  }
+  
+  # Return the values for mu and sigma from the final EM iteration.
+  list(mu=mu, sigma=sigma)
+}
+```
+
+### Generate 5 data sets and test function EM.truncnorm
+```{r}
+#data set 1
+Z1 <- rnorm(100,0,2)
+y1 <- floor(Z1)
+EM1 <- EM.truncnorm(m=100, y1);EM1
+#data set 2
+Z2 <- rnorm(100,0,2)
+y2 <- floor(Z2)
+EM2 <- EM.truncnorm(m=1000, y2);EM2
+#data set 3
+Z3 <- rnorm(1000,0,2)
+y3 <- floor(Z3)
+EM3 <- EM.truncnorm(m=100, y3);EM3
+#data set 4
+Z4 <- rnorm(5000,6,4)
+y4 <- floor(Z4)
+EM4 <- EM.truncnorm(m=1000, y4);EM4
+#data set 5
+Z5 <- rnorm(10000,-5,5)
+y5 <- floor(Z5)
+EM5 <- EM.truncnorm(m=1000, y5);EM5
+```
+
+### R built-in function nlm to find MLE
+```{r}
+##use R built-in function nlm to find MLE
+neg_loglike <- function(b,y)
+{
+  -sum(log(pnorm((y+1-b[1])/b[2]) - pnorm((y-b[1])/b[2])))
+}
+
+EM_nlm1 <- nlm (neg_loglike, c(mean(y1), sqrt(var(y1))) , y1, hessian = T)
+EM_nlm2 <- nlm (neg_loglike, c(mean(y2), sqrt(var(y2))) , y2, hessian = T)
+EM_nlm3 <- nlm (neg_loglike, c(mean(y3), sqrt(var(y3))) , y3, hessian = T)
+EM_nlm4 <- nlm (neg_loglike, c(mean(y4), sqrt(var(y4))) , y4, hessian = T)
+EM_nlm5 <- nlm (neg_loglike, c(mean(y5), sqrt(var(y5))) , y5, hessian = T)
+
+# compare estimates based on function EM.truncnorm and built-in function nlm
+r1 <- c(0,2,unlist(EM1),EM_nlm1$estimate); r2 <- c(0,2,unlist(EM2),EM_nlm2$estimate)
+r3 <- c(0,2,unlist(EM3),EM_nlm3$estimate); r4 <- c(6,4,unlist(EM4),EM_nlm4$estimate)
+r5 <- c(-5,5,unlist(EM5),EM_nlm5$estimate)
+compare2 <- data.frame(rbind(r1,r2,r3,r4,r5),
+                row.names = c("data1","data2","data3","data4","data5"))
+colnames(compare2) <- c("mu_true","sigma_true","mu_EM","sigma_EM","mu_nlm","sigma_nlm")
+format(compare2, digits=5) 
+```
+
+### Comments
+For the above data sets, function EM.truncnorm and built-in function nlm got the similar estimates close to the true parameters, which means both approaches are effective. The sample size for observed data y is denoted by n, and m is the sample size drawing from truncnorm when approximate the expectations. Data set 1,2,3 are drawed from the same parameters, but different values of n/m. 
+
+For data 1, n=100, m=100; data 2, n=100, m=1000; data 3, n=1000, m=100; data 4, n=5000, m=1000; data 5, n=10000, m=1000. It can be clearly seen that as sample size n/m increases, the estimates become more accurate.
